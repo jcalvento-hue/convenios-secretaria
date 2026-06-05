@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Estadísticas de Convenios</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f4f8; color: #1a202c; padding: 20px; }
+    h1 { font-size: 1.3rem; font-weight: 700; color: #1a202c; margin-bottom: 2px; }
+    .subtitle { color: #718096; font-size: 0.8rem; margin-bottom: 14px; }
+    .filter-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+    .filter-label { font-size: 0.72rem; font-weight: 700; color: #718096; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 4px; }
+    .filter-btn { padding: 5px 12px; border-radius: 20px; border: 1.5px solid #cbd5e0; background: white; font-size: 0.78rem; font-weight: 600; color: #4a5568; cursor: pointer; transition: all 0.15s; }
+    .filter-btn:hover { border-color: #2563eb; color: #2563eb; }
+    .filter-btn.active { background: #2563eb; border-color: #2563eb; color: white; }
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+    .kpi { background: white; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.07); }
+    .kpi-value { font-size: 1.9rem; font-weight: 800; color: #2563eb; line-height: 1; }
+    .kpi-label { font-size: 0.7rem; color: #a0aec0; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; }
+    .section-title { font-size: 0.7rem; font-weight: 700; color: #a0aec0; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; margin-top: 6px; }
+    .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .chart-card { background: white; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.07); }
+    .chart-card.wide { grid-column: span 2; }
+    .chart-title { font-size: 0.72rem; font-weight: 700; color: #4a5568; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.7px; }
+    .chart-container { position: relative; height: 200px; }
+    .chart-container.tall { height: 240px; }
+    .loading { text-align: center; padding: 60px; color: #a0aec0; font-size: 0.9rem; }
+    .loading-spinner { display: inline-block; width: 28px; height: 28px; border: 3px solid #e2e8f0; border-top-color: #2563eb; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error { padding: 20px; color: #e53e3e; font-size: 0.85rem; background: white; border-radius: 10px; white-space: pre-wrap; word-break: break-all; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
+</head>
+<body>
+  <h1>Convenios — Secretaría</h1>
+  <p class="subtitle">Datos en tiempo real desde Google Drive</p>
+  <div id="app"><div class="loading"><div class="loading-spinner"></div><br>Cargando datos...</div></div>
+
+  <script>
+    const FILE_ID = '1KNkJUK-X0EdohS49OPgCodAfd3g3yFDkMqF0MrOFlpY';
+    let ALL_DATA = [];
+    let ALL_YEARS = [];
+    const CHARTS = {};
+
+    // ── Normalización de área ──
+    function normalizeArea(area) {
+      return area === 'Secretaría de extensión y relaciones internacionales'
+        ? 'Secretaría de vinculación y extensión' : area;
+    }
+
+    // ── Decodifica base64 a texto UTF-8 ──
+    function b64ToText(b64) {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+
+    // ── Parser CSV robusto (maneja campos con comas y comillas) ──
+    function parseCSVLine(line) {
+      const cells = [];
+      let cur = '', inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          if (inQ && line[i+1] === '"') { cur += '"'; i++; }
+          else inQ = !inQ;
+        } else if (ch === ',' && !inQ) { cells.push(cur); cur = ''; }
+        else cur += ch;
+      }
+      cells.push(cur);
+      return cells;
+    }
+
+    function parseCSV(text) {
+      const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim());
+      const headers = parseCSVLine(lines[0]).map(h => h.trim());
+      const rows = [];
+      for (let i = 1; i < lines.length; i++) {
+        const cells = parseCSVLine(lines[i]);
+        const row = {};
+        headers.forEach((h, j) => { row[h] = (cells[j] || '').trim(); });
+        rows.push(row);
+      }
+      return rows;
+    }
+
+    // ── Extrae base64 del resultado MCP (maneja JSON anidado) ──
+    function extractB64(result) {
+      if (!result) return '';
+      if (typeof result === 'string') {
+        try { return extractB64(JSON.parse(result)); } catch(e) { return result; }
+      }
+      if (result.content != null) {
+        if (typeof result.content === 'string' && result.content.length > 100) return result.content;
+        if (Array.isArray(result.content))
+          return result.content.filter(c => c.type === 'text').map(c => extractB64(c.text)).join('');
+      }
+      if (result.text != null) return extractB64(result.text);
+      return JSON.stringify(result);
+    }
+
+    // ── Utilidades ──
+    function count(arr, key) {
+      const c = {};
+      arr.forEach(r => { const v = (r[key]||'').trim()||'Sin dato'; c[v]=(c[v]||0)+1; });
+      return c;
+    }
+    function topEntries(obj, n=20) {
+      return Object.entries(obj).filter(([k])=>k&&k!=='Sin dato').sort((a,b)=>b[1]-a[1]).slice(0,n);
+    }
+
+    // ── Charts ──
+    const PAL = ['#2563eb','#16a34a','#d97706','#dc2626','#7c3aed','#0891b2','#be185d','#65a30d','#ea580c','#6366f1','#0d9488','#b45309','#9333ea','#0369a1'];
+    function destroyChart(id) { if (CHARTS[id]) { CHARTS[id].destroy(); delete CHARTS[id]; } }
+
+    function makeBar(id, labels, data, horizontal) {
+      destroyChart(id);
+      CHARTS[id] = new Chart(document.getElementById(id), {
+        type: 'bar',
+        data: { labels, datasets: [{ data, backgroundColor: PAL.slice(0, labels.length), borderWidth: 0 }] },
+        options: {
+          indexAxis: horizontal ? 'y' : 'x', responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { grid: { display: !horizontal }, ticks: { font: { size: 10 } } },
+            y: { grid: { display: !!horizontal }, ticks: { font: { size: 10 } }, beginAtZero: true }
+          }
+        }
+      });
+    }
+
+    function makeDoughnut(id, labels, data) {
+      destroyChart(id);
+      CHARTS[id] = new Chart(document.getElementById(id), {
+        type: 'doughnut',
+        data: { labels, datasets: [{ data, backgroundColor: PAL.slice(0, labels.length), borderWidth: 2, borderColor: '#fff' }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 11, padding: 8 } } }
+        }
+      });
+    }
+
+    function makeLine(id, years, datasets) {
+      destroyChart(id);
+      CHARTS[id] = new Chart(document.getElementById(id), {
+        type: 'line',
+        data: {
+          labels: years,
+          datasets: datasets.map((d, i) => ({
+            label: d.label, data: d.data,
+            borderColor: PAL[i], backgroundColor: PAL[i] + '22',
+            tension: 0.3, pointRadius: 4, fill: true, borderWidth: 2
+          }))
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'top', labels: { font: { size: 10 }, boxWidth: 12 } } },
+          scales: {
+            x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+            y: { ticks: { font: { size: 10 }, stepSize: 1 }, beginAtZero: true }
+          }
+        }
+      });
+    }
+
+    // ── Render ──
+    function renderAll(data) {
+      const nacIntKey = Object.keys(data[0]||{}).find(k=>k.toLowerCase().includes('nacional'))||'';
+      document.getElementById('kpi-total').textContent = data.length;
+      document.getElementById('kpi-contra').textContent = new Set(data.map(r=>r['Contraparte']).filter(Boolean)).size;
+      document.getElementById('kpi-marco').textContent = data.filter(r=>(r['Tipo de Convenio']||'').trim()==='Marco').length;
+      document.getElementById('kpi-intl').textContent = data.filter(r=>(r[nacIntKey]||'').trim()==='Internacional').length;
+
+      const byYear = count(data, 'AÑO');
+      const years = Object.keys(byYear).filter(y=>y&&y!=='Sin dato').sort();
+      makeBar('c-year', years, years.map(y=>byYear[y]||0), false);
+
+      makeDoughnut('c-tipo', ...zip(topEntries(count(data,'Tipo de Convenio'))));
+      makeDoughnut('c-nacint', ...zip(topEntries(count(data, nacIntKey))));
+
+      const entE = topEntries(count(data,'Tipo entidad contraparte'), 10);
+      makeBar('c-entidad', entE.map(e=>e[0]), entE.map(e=>e[1]), true);
+      const objE = topEntries(count(data,'Objeto'));
+      makeBar('c-objeto', objE.map(e=>e[0]), objE.map(e=>e[1]), false);
+
+      const areaNorm = {};
+      Object.entries(count(data,'Área Involucrada')).forEach(([k,v])=>{
+        const n=normalizeArea(k); areaNorm[n]=(areaNorm[n]||0)+v;
+      });
+      const areaE = topEntries(areaNorm);
+      makeBar('c-area', areaE.map(e=>e[0]), areaE.map(e=>e[1]), true);
+    }
+
+    function zip(entries) { return [entries.map(e=>e[0]), entries.map(e=>e[1])]; }
+
+    function renderEvolucion() {
+      const marcoByYear = ALL_YEARS.map(y => ALL_DATA.filter(r=>r['AÑO']===y&&(r['Tipo de Convenio']||'').trim()==='Marco').length);
+      const especByYear  = ALL_YEARS.map(y => ALL_DATA.filter(r=>r['AÑO']===y&&(r['Tipo de Convenio']||'').trim()==='Especifico').length);
+      makeLine('c-evo-marco', ALL_YEARS, [{ label: 'Marco', data: marcoByYear }]);
+      makeLine('c-evo-espec', ALL_YEARS, [{ label: 'Específico', data: especByYear }]);
+    }
+
+    function setFilter(year) {
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.year === year));
+      localStorage.setItem('convenios-filter', year);
+      renderAll(year === 'Todos' ? ALL_DATA : ALL_DATA.filter(r => r['AÑO'] === year));
+    }
+
+    // ── Carga — exporta como CSV para tener TODAS las filas ──
+    async function load() {
+      try {
+        const result = await window.cowork.callMcpTool(
+          'mcp__838d0fc8-bc89-49bb-8e54-e1bf4b0b6ba7__download_file_content',
+          { fileId: FILE_ID, exportMimeType: 'text/csv' }
+        );
+
+        const b64 = extractB64(result);
+        if (!b64) throw new Error('Respuesta vacía.');
+
+        const csvText = b64ToText(b64);
+        const rows = parseCSV(csvText);
+        ALL_DATA = rows.filter(r => r['ID'] && /^\d+$/.test(r['ID']));
+        if (!ALL_DATA.length) throw new Error('Sin filas válidas. Primeros 200 chars del CSV:\n' + csvText.slice(0, 200));
+
+        ALL_YEARS = [...new Set(ALL_DATA.map(r=>r['AÑO']).filter(Boolean))].sort();
+
+        const savedFilter = localStorage.getItem('convenios-filter') || 'Todos';
+        document.getElementById('app').innerHTML = `
+          <div class="filter-bar">
+            <span class="filter-label">Año</span>
+            ${['Todos',...ALL_YEARS].map(y=>`<button class="filter-btn${y===savedFilter?' active':''}" data-year="${y}" onclick="setFilter('${y}')">${y}</button>`).join('')}
+          </div>
+          <div class="kpis">
+            <div class="kpi"><div class="kpi-value" id="kpi-total">—</div><div class="kpi-label">Total Convenios</div></div>
+            <div class="kpi"><div class="kpi-value" id="kpi-contra">—</div><div class="kpi-label">Contrapartes</div></div>
+            <div class="kpi"><div class="kpi-value" id="kpi-marco">—</div><div class="kpi-label">Marco</div></div>
+            <div class="kpi"><div class="kpi-value" id="kpi-intl">—</div><div class="kpi-label">Internacionales</div></div>
+          </div>
+          <div class="section-title">Evolución Anual (todos los años)</div>
+          <div class="charts-grid">
+            <div class="chart-card">
+              <div class="chart-title">Evolución — Convenios Marco</div>
+              <div class="chart-container"><canvas id="c-evo-marco"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">Evolución — Convenios Específicos</div>
+              <div class="chart-container"><canvas id="c-evo-espec"></canvas></div>
+            </div>
+          </div>
+          <div class="section-title">Distribución (según filtro de año)</div>
+          <div class="charts-grid">
+            <div class="chart-card wide"><div class="chart-title">Convenios por Año</div><div class="chart-container"><canvas id="c-year"></canvas></div></div>
+            <div class="chart-card"><div class="chart-title">Tipo de Convenio</div><div class="chart-container"><canvas id="c-tipo"></canvas></div></div>
+            <div class="chart-card"><div class="chart-title">Nacional / Internacional</div><div class="chart-container"><canvas id="c-nacint"></canvas></div></div>
+            <div class="chart-card wide"><div class="chart-title">Por Tipo de Entidad Contraparte</div><div class="chart-container tall"><canvas id="c-entidad"></canvas></div></div>
+            <div class="chart-card wide"><div class="chart-title">Por Objeto</div><div class="chart-container"><canvas id="c-objeto"></canvas></div></div>
+            <div class="chart-card wide"><div class="chart-title">Por Área Involucrada</div><div class="chart-container tall"><canvas id="c-area"></canvas></div></div>
+          </div>
+        `;
+
+        renderEvolucion();
+        renderAll(savedFilter === 'Todos' ? ALL_DATA : ALL_DATA.filter(r=>r['AÑO']===savedFilter));
+
+      } catch(e) {
+        document.getElementById('app').innerHTML = `<div class="error">❌ ${e.message}</div>`;
+      }
+    }
+
+    function waitForCowork(cb, tries=0) {
+      if (window.cowork && typeof window.cowork.callMcpTool === 'function') cb();
+      else if (tries < 50) setTimeout(() => waitForCowork(cb, tries+1), 100);
+      else document.getElementById('app').innerHTML = '<div class="error">❌ No se pudo conectar con Google Drive.</div>';
+    }
+
+    waitForCowork(load);
+  </script>
+</body>
+</html>
