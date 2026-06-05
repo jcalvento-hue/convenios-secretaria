@@ -33,206 +33,66 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
 </head>
 <body>
-  <h1>Convenios — Secretaría</h1>
+  <h1>Convenios - Secretaria</h1>
   <p class="subtitle">Datos en tiempo real desde Google Drive</p>
   <div id="app"><div class="loading"><div class="loading-spinner"></div><br>Cargando datos...</div></div>
-
   <script>
     const FILE_ID = '1KNkJUK-X0EdohS49OPgCodAfd3g3yFDkMqF0MrOFlpY';
-    let ALL_DATA = [];
-    let ALL_YEARS = [];
+    let ALL_DATA = [], ALL_YEARS = [];
     const CHARTS = {};
-
-    // ── Normalización de área ──
-    function normalizeArea(area) {
-      return area === 'Secretaría de extensión y relaciones internacionales'
-        ? 'Secretaría de vinculación y extensión' : area;
+    function normalizeArea(a){return a==='Secretaría de extensión y relaciones internacionales'?'Secretaría de vinculación y extensión':a;}
+    function b64ToText(b){const bin=atob(b);const by=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)by[i]=bin.charCodeAt(i);return new TextDecoder('utf-8').decode(by);}
+    function parseCSVLine(line){const cells=[];let cur='',inQ=false;for(let i=0;i<line.length;i++){const ch=line[i];if(ch==='"'){if(inQ&&line[i+1]==='"'){cur+='"';i++;}else inQ=!inQ;}else if(ch===','&&!inQ){cells.push(cur);cur='';}else cur+=ch;}cells.push(cur);return cells;}
+    function parseCSV(text){const lines=text.replace(/\r/g,'').split('\n').filter(l=>l.trim());const headers=parseCSVLine(lines[0]).map(h=>h.trim());const rows=[];for(let i=1;i<lines.length;i++){const cells=parseCSVLine(lines[i]);const row={};headers.forEach((h,j)=>{row[h]=(cells[j]||'').trim();});rows.push(row);}return rows;}
+    function extractB64(r){if(!r)return'';if(typeof r==='string'){try{return extractB64(JSON.parse(r));}catch(e){return r;}}if(r.content!=null){if(typeof r.content==='string'&&r.content.length>100)return r.content;if(Array.isArray(r.content))return r.content.filter(c=>c.type==='text').map(c=>extractB64(c.text)).join('');}if(r.text!=null)return extractB64(r.text);return JSON.stringify(r);}
+    function count(arr,key){const c={};arr.forEach(r=>{const v=(r[key]||'').trim()||'Sin dato';c[v]=(c[v]||0)+1;});return c;}
+    function topEntries(obj,n=20){return Object.entries(obj).filter(([k])=>k&&k!=='Sin dato').sort((a,b)=>b[1]-a[1]).slice(0,n);}
+    function zip(e){return[e.map(x=>x[0]),e.map(x=>x[1])];}
+    const PAL=['#2563eb','#16a34a','#d97706','#dc2626','#7c3aed','#0891b2','#be185d','#65a30d','#ea580c','#6366f1','#0d9488','#b45309','#9333ea','#0369a1'];
+    function destroyChart(id){if(CHARTS[id]){CHARTS[id].destroy();delete CHARTS[id];}}
+    function makeBar(id,labels,data,h){destroyChart(id);CHARTS[id]=new Chart(document.getElementById(id),{type:'bar',data:{labels,datasets:[{data,backgroundColor:PAL.slice(0,labels.length),borderWidth:0}]},options:{indexAxis:h?'y':'x',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:!h},ticks:{font:{size:10}}},y:{grid:{display:!!h},ticks:{font:{size:10}},beginAtZero:true}}}});}
+    function makeDoughnut(id,labels,data){destroyChart(id);CHARTS[id]=new Chart(document.getElementById(id),{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:PAL.slice(0,labels.length),borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10},boxWidth:11,padding:8}}}}});}
+    function makeLine(id,years,datasets){destroyChart(id);CHARTS[id]=new Chart(document.getElementById(id),{type:'line',data:{labels:years,datasets:datasets.map((d,i)=>({label:d.label,data:d.data,borderColor:PAL[i],backgroundColor:PAL[i]+'22',tension:0.3,pointRadius:4,fill:true,borderWidth:2}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{font:{size:10},boxWidth:12}}},scales:{x:{grid:{display:false},ticks:{font:{size:10}}},y:{ticks:{font:{size:10},stepSize:1},beginAtZero:true}}}});}
+    function renderAll(data){
+      const nk=Object.keys(data[0]||{}).find(k=>k.toLowerCase().includes('nacional'))||'';
+      document.getElementById('kpi-total').textContent=data.length;
+      document.getElementById('kpi-contra').textContent=new Set(data.map(r=>r['Contraparte']).filter(Boolean)).size;
+      document.getElementById('kpi-marco').textContent=data.filter(r=>(r['Tipo de Convenio']||'').trim()==='Marco').length;
+      document.getElementById('kpi-intl').textContent=data.filter(r=>(r[nk]||'').trim()==='Internacional').length;
+      const byYear=count(data,'AÑO');const years=Object.keys(byYear).filter(y=>y&&y!=='Sin dato').sort();
+      makeBar('c-year',years,years.map(y=>byYear[y]||0),false);
+      makeDoughnut('c-tipo',...zip(topEntries(count(data,'Tipo de Convenio'))));
+      makeDoughnut('c-nacint',...zip(topEntries(count(data,nk))));
+      const entE=topEntries(count(data,'Tipo entidad contraparte'),10);makeBar('c-entidad',entE.map(e=>e[0]),entE.map(e=>e[1]),true);
+      const objE=topEntries(count(data,'Objeto'));makeBar('c-objeto',objE.map(e=>e[0]),objE.map(e=>e[1]),false);
+      const an={};Object.entries(count(data,'Área Involucrada')).forEach(([k,v])=>{const n=normalizeArea(k);an[n]=(an[n]||0)+v;});
+      const aE=topEntries(an);makeBar('c-area',aE.map(e=>e[0]),aE.map(e=>e[1]),true);
     }
-
-    // ── Decodifica base64 a texto UTF-8 ──
-    function b64ToText(b64) {
-      const bin = atob(b64);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      return new TextDecoder('utf-8').decode(bytes);
+    function renderEvolucion(){
+      const m=ALL_YEARS.map(y=>ALL_DATA.filter(r=>r['AÑO']===y&&(r['Tipo de Convenio']||'').trim()==='Marco').length);
+      const e=ALL_YEARS.map(y=>ALL_DATA.filter(r=>r['AÑO']===y&&(r['Tipo de Convenio']||'').trim()==='Especifico').length);
+      makeLine('c-evo-marco',ALL_YEARS,[{label:'Marco',data:m}]);
+      makeLine('c-evo-espec',ALL_YEARS,[{label:'Específico',data:e}]);
     }
-
-    // ── Parser CSV robusto (maneja campos con comas y comillas) ──
-    function parseCSVLine(line) {
-      const cells = [];
-      let cur = '', inQ = false;
-      for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
-        if (ch === '"') {
-          if (inQ && line[i+1] === '"') { cur += '"'; i++; }
-          else inQ = !inQ;
-        } else if (ch === ',' && !inQ) { cells.push(cur); cur = ''; }
-        else cur += ch;
-      }
-      cells.push(cur);
-      return cells;
-    }
-
-    function parseCSV(text) {
-      const lines = text.replace(/\r/g, '').split('\n').filter(l => l.trim());
-      const headers = parseCSVLine(lines[0]).map(h => h.trim());
-      const rows = [];
-      for (let i = 1; i < lines.length; i++) {
-        const cells = parseCSVLine(lines[i]);
-        const row = {};
-        headers.forEach((h, j) => { row[h] = (cells[j] || '').trim(); });
-        rows.push(row);
-      }
-      return rows;
-    }
-
-    // ── Extrae base64 del resultado MCP (maneja JSON anidado) ──
-    function extractB64(result) {
-      if (!result) return '';
-      if (typeof result === 'string') {
-        try { return extractB64(JSON.parse(result)); } catch(e) { return result; }
-      }
-      if (result.content != null) {
-        if (typeof result.content === 'string' && result.content.length > 100) return result.content;
-        if (Array.isArray(result.content))
-          return result.content.filter(c => c.type === 'text').map(c => extractB64(c.text)).join('');
-      }
-      if (result.text != null) return extractB64(result.text);
-      return JSON.stringify(result);
-    }
-
-    // ── Utilidades ──
-    function count(arr, key) {
-      const c = {};
-      arr.forEach(r => { const v = (r[key]||'').trim()||'Sin dato'; c[v]=(c[v]||0)+1; });
-      return c;
-    }
-    function topEntries(obj, n=20) {
-      return Object.entries(obj).filter(([k])=>k&&k!=='Sin dato').sort((a,b)=>b[1]-a[1]).slice(0,n);
-    }
-
-    // ── Charts ──
-    const PAL = ['#2563eb','#16a34a','#d97706','#dc2626','#7c3aed','#0891b2','#be185d','#65a30d','#ea580c','#6366f1','#0d9488','#b45309','#9333ea','#0369a1'];
-    function destroyChart(id) { if (CHARTS[id]) { CHARTS[id].destroy(); delete CHARTS[id]; } }
-
-    function makeBar(id, labels, data, horizontal) {
-      destroyChart(id);
-      CHARTS[id] = new Chart(document.getElementById(id), {
-        type: 'bar',
-        data: { labels, datasets: [{ data, backgroundColor: PAL.slice(0, labels.length), borderWidth: 0 }] },
-        options: {
-          indexAxis: horizontal ? 'y' : 'x', responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
-          scales: {
-            x: { grid: { display: !horizontal }, ticks: { font: { size: 10 } } },
-            y: { grid: { display: !!horizontal }, ticks: { font: { size: 10 } }, beginAtZero: true }
-          }
+    function setFilter(year){document.querySelectorAll('.filter-btn').forEach(b=>b.classList.toggle('active',b.dataset.year===year));localStorage.setItem('convenios-filter',year);renderAll(year==='Todos'?ALL_DATA:ALL_DATA.filter(r=>r['AÑO']===year));}
+    const CSV_URL=`https://docs.google.com/spreadsheets/d/${FILE_ID}/export?format=csv&gid=0`;
+    async function load(){
+      try{
+        let csvText;
+        try{const resp=await fetch(CSV_URL);if(!resp.ok)throw new Error(`HTTP ${resp.status}`);csvText=await resp.text();}
+        catch(fe){
+          if(window.cowork&&typeof window.cowork.callMcpTool==='function'){
+            const result=await window.cowork.callMcpTool('mcp__838d0fc8-bc89-49bb-8e54-e1bf4b0b6ba7__download_file_content',{fileId:FILE_ID,exportMimeType:'text/csv'});
+            const b64=extractB64(result);if(!b64)throw new Error('Respuesta vacia.');csvText=b64ToText(b64);
+          }else{throw new Error('La planilla necesita ser compartida publicamente en Google Drive.\nCompartir -> "Cualquiera con el link puede ver"');}
         }
-      });
-    }
-
-    function makeDoughnut(id, labels, data) {
-      destroyChart(id);
-      CHARTS[id] = new Chart(document.getElementById(id), {
-        type: 'doughnut',
-        data: { labels, datasets: [{ data, backgroundColor: PAL.slice(0, labels.length), borderWidth: 2, borderColor: '#fff' }] },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { position: 'right', labels: { font: { size: 10 }, boxWidth: 11, padding: 8 } } }
-        }
-      });
-    }
-
-    function makeLine(id, years, datasets) {
-      destroyChart(id);
-      CHARTS[id] = new Chart(document.getElementById(id), {
-        type: 'line',
-        data: {
-          labels: years,
-          datasets: datasets.map((d, i) => ({
-            label: d.label, data: d.data,
-            borderColor: PAL[i], backgroundColor: PAL[i] + '22',
-            tension: 0.3, pointRadius: 4, fill: true, borderWidth: 2
-          }))
-        },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { position: 'top', labels: { font: { size: 10 }, boxWidth: 12 } } },
-          scales: {
-            x: { grid: { display: false }, ticks: { font: { size: 10 } } },
-            y: { ticks: { font: { size: 10 }, stepSize: 1 }, beginAtZero: true }
-          }
-        }
-      });
-    }
-
-    // ── Render ──
-    function renderAll(data) {
-      const nacIntKey = Object.keys(data[0]||{}).find(k=>k.toLowerCase().includes('nacional'))||'';
-      document.getElementById('kpi-total').textContent = data.length;
-      document.getElementById('kpi-contra').textContent = new Set(data.map(r=>r['Contraparte']).filter(Boolean)).size;
-      document.getElementById('kpi-marco').textContent = data.filter(r=>(r['Tipo de Convenio']||'').trim()==='Marco').length;
-      document.getElementById('kpi-intl').textContent = data.filter(r=>(r[nacIntKey]||'').trim()==='Internacional').length;
-
-      const byYear = count(data, 'AÑO');
-      const years = Object.keys(byYear).filter(y=>y&&y!=='Sin dato').sort();
-      makeBar('c-year', years, years.map(y=>byYear[y]||0), false);
-
-      makeDoughnut('c-tipo', ...zip(topEntries(count(data,'Tipo de Convenio'))));
-      makeDoughnut('c-nacint', ...zip(topEntries(count(data, nacIntKey))));
-
-      const entE = topEntries(count(data,'Tipo entidad contraparte'), 10);
-      makeBar('c-entidad', entE.map(e=>e[0]), entE.map(e=>e[1]), true);
-      const objE = topEntries(count(data,'Objeto'));
-      makeBar('c-objeto', objE.map(e=>e[0]), objE.map(e=>e[1]), false);
-
-      const areaNorm = {};
-      Object.entries(count(data,'Área Involucrada')).forEach(([k,v])=>{
-        const n=normalizeArea(k); areaNorm[n]=(areaNorm[n]||0)+v;
-      });
-      const areaE = topEntries(areaNorm);
-      makeBar('c-area', areaE.map(e=>e[0]), areaE.map(e=>e[1]), true);
-    }
-
-    function zip(entries) { return [entries.map(e=>e[0]), entries.map(e=>e[1])]; }
-
-    function renderEvolucion() {
-      const marcoByYear = ALL_YEARS.map(y => ALL_DATA.filter(r=>r['AÑO']===y&&(r['Tipo de Convenio']||'').trim()==='Marco').length);
-      const especByYear  = ALL_YEARS.map(y => ALL_DATA.filter(r=>r['AÑO']===y&&(r['Tipo de Convenio']||'').trim()==='Especifico').length);
-      makeLine('c-evo-marco', ALL_YEARS, [{ label: 'Marco', data: marcoByYear }]);
-      makeLine('c-evo-espec', ALL_YEARS, [{ label: 'Específico', data: especByYear }]);
-    }
-
-    function setFilter(year) {
-      document.querySelectorAll('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.year === year));
-      localStorage.setItem('convenios-filter', year);
-      renderAll(year === 'Todos' ? ALL_DATA : ALL_DATA.filter(r => r['AÑO'] === year));
-    }
-
-    // ── Carga — exporta como CSV para tener TODAS las filas ──
-    async function load() {
-      try {
-        const result = await window.cowork.callMcpTool(
-          'mcp__838d0fc8-bc89-49bb-8e54-e1bf4b0b6ba7__download_file_content',
-          { fileId: FILE_ID, exportMimeType: 'text/csv' }
-        );
-
-        const b64 = extractB64(result);
-        if (!b64) throw new Error('Respuesta vacía.');
-
-        const csvText = b64ToText(b64);
-        const rows = parseCSV(csvText);
-        ALL_DATA = rows.filter(r => r['ID'] && /^\d+$/.test(r['ID']));
-        if (!ALL_DATA.length) throw new Error('Sin filas válidas. Primeros 200 chars del CSV:\n' + csvText.slice(0, 200));
-
-        ALL_YEARS = [...new Set(ALL_DATA.map(r=>r['AÑO']).filter(Boolean))].sort();
-
-        const savedFilter = localStorage.getItem('convenios-filter') || 'Todos';
-        document.getElementById('app').innerHTML = `
-          <div class="filter-bar">
-            <span class="filter-label">Año</span>
-            ${['Todos',...ALL_YEARS].map(y=>`<button class="filter-btn${y===savedFilter?' active':''}" data-year="${y}" onclick="setFilter('${y}')">${y}</button>`).join('')}
-          </div>
+        const rows=parseCSV(csvText);
+        ALL_DATA=rows.filter(r=>r['ID']&&/^\d+$/.test(r['ID']));
+        if(!ALL_DATA.length)throw new Error('Sin filas validas.');
+        ALL_YEARS=[...new Set(ALL_DATA.map(r=>r['AÑO']).filter(Boolean))].sort();
+        const sf=localStorage.getItem('convenios-filter')||'Todos';
+        document.getElementById('app').innerHTML=`
+          <div class="filter-bar"><span class="filter-label">Año</span>${['Todos',...ALL_YEARS].map(y=>`<button class="filter-btn${y===sf?' active':''}" data-year="${y}" onclick="setFilter('${y}')">${y}</button>`).join('')}</div>
           <div class="kpis">
             <div class="kpi"><div class="kpi-value" id="kpi-total">—</div><div class="kpi-label">Total Convenios</div></div>
             <div class="kpi"><div class="kpi-value" id="kpi-contra">—</div><div class="kpi-label">Contrapartes</div></div>
@@ -241,14 +101,8 @@
           </div>
           <div class="section-title">Evolución Anual (todos los años)</div>
           <div class="charts-grid">
-            <div class="chart-card">
-              <div class="chart-title">Evolución — Convenios Marco</div>
-              <div class="chart-container"><canvas id="c-evo-marco"></canvas></div>
-            </div>
-            <div class="chart-card">
-              <div class="chart-title">Evolución — Convenios Específicos</div>
-              <div class="chart-container"><canvas id="c-evo-espec"></canvas></div>
-            </div>
+            <div class="chart-card"><div class="chart-title">Evolución - Convenios Marco</div><div class="chart-container"><canvas id="c-evo-marco"></canvas></div></div>
+            <div class="chart-card"><div class="chart-title">Evolución - Convenios Específicos</div><div class="chart-container"><canvas id="c-evo-espec"></canvas></div></div>
           </div>
           <div class="section-title">Distribución (según filtro de año)</div>
           <div class="charts-grid">
@@ -258,23 +112,11 @@
             <div class="chart-card wide"><div class="chart-title">Por Tipo de Entidad Contraparte</div><div class="chart-container tall"><canvas id="c-entidad"></canvas></div></div>
             <div class="chart-card wide"><div class="chart-title">Por Objeto</div><div class="chart-container"><canvas id="c-objeto"></canvas></div></div>
             <div class="chart-card wide"><div class="chart-title">Por Área Involucrada</div><div class="chart-container tall"><canvas id="c-area"></canvas></div></div>
-          </div>
-        `;
-
-        renderEvolucion();
-        renderAll(savedFilter === 'Todos' ? ALL_DATA : ALL_DATA.filter(r=>r['AÑO']===savedFilter));
-
-      } catch(e) {
-        document.getElementById('app').innerHTML = `<div class="error">❌ ${e.message}</div>`;
-      }
+          </div>`;
+        renderEvolucion();renderAll(sf==='Todos'?ALL_DATA:ALL_DATA.filter(r=>r['AÑO']===sf));
+      }catch(e){document.getElementById('app').innerHTML<`<div class="error">❌ ${e.message}</div>`;}
     }
-
-    function waitForCowork(cb, tries=0) {
-      if (window.cowork && typeof window.cowork.callMcpTool === 'function') cb();
-      else if (tries < 50) setTimeout(() => waitForCowork(cb, tries+1), 100);
-      else document.getElementById('app').innerHTML = '<div class="error">❌ No se pudo conectar con Google Drive.</div>';
-    }
-
+    function waitForCowork(cb,tries=0){if(window.cowork&&typeof window.cowork.callMcpTool==='function')cb();else if(tries<50)setTimeout(()=>waitForCowork(cb,tries+1),100);else load();}
     waitForCowork(load);
   </script>
 </body>
