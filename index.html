@@ -120,7 +120,7 @@
     async function load(){
       try{
         let csvText;
-        try{const resp=await fetch(CSV_URL);if(!resp.ok)throw new Error(`HTTP ${resp.status}`);csvText=await resp.text();}
+        try{const ctrl=new AbortController();const tid=setTimeout(()=>ctrl.abort(),8000);const resp=await fetch(CSV_URL,{signal:ctrl.signal});clearTimeout(tid);if(!resp.ok)throw new Error(`HTTP ${resp.status}`);csvText=await resp.text();}
         catch(fe){
           if(window.cowork&&typeof window.cowork.callMcpTool==='function'){
             const result=await window.cowork.callMcpTool('mcp__838d0fc8-bc89-49bb-8e54-e1bf4b0b6ba7__download_file_content',{fileId:FILE_ID,exportMimeType:'text/csv'});
@@ -169,4 +169,8 @@
         renderEvolucion();applyFilters();
       }catch(e){document.getElementById('app').innerHTML=`<div class="error">❌ ${e.message}</div>`;}
     }
-    function waitForCowork(cb,tries=0){if(window.cowork&&typeof window.cowork.callMcpTool==='function')cb();else if(tr
+    function waitForCowork(cb,tries=0){if(window.cowork&&typeof window.cowork.callMcpTool==='function')cb();else if(tries<50)setTimeout(()=>waitForCowork(cb,tries+1),100);else load();}
+    waitForCowork(load);
+  </script>
+</body>
+</html>
