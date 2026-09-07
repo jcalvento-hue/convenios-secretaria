@@ -105,7 +105,15 @@
       makeLine('c-evo-marco',ALL_YEARS,[{label:'Marco',data:m}]);
       makeLine('c-evo-espec',ALL_YEARS,[{label:'Específico',data:e}]);
     }
-    function setFilter(year){document.querySelectorAll('.filter-btn').forEach(b=>b.classList.toggle('active',b.dataset.year===year));localStorage.setItem('convenios-filter',year);renderAll(year==='Todos'?ALL_DATA:ALL_DATA.filter(r=>r['AÑO']===year));}
+    let ACTIVE_YEAR='Todos', ACTIVE_CP='Todas';
+    function applyFilters(){
+      let d=ALL_DATA;
+      if(ACTIVE_YEAR!=='Todos')d=d.filter(r=>r['AÑO']===ACTIVE_YEAR);
+      if(ACTIVE_CP!=='Todas')d=d.filter(r=>(r['Contraparte']||'').trim()===ACTIVE_CP);
+      renderAll(d);
+    }
+    function setFilter(year){ACTIVE_YEAR=year;document.querySelectorAll('.filter-btn[data-year]').forEach(b=>b.classList.toggle('active',b.dataset.year===year));localStorage.setItem('convenios-filter',year);applyFilters();}
+    function setFilterCP(cp){ACTIVE_CP=cp;document.querySelectorAll('.filter-btn[data-cp]').forEach(b=>b.classList.toggle('active',b.dataset.cp===cp));localStorage.setItem('convenios-filter-cp',cp);applyFilters();}
     const CSV_URL=`https://docs.google.com/spreadsheets/d/${FILE_ID}/export?format=csv&gid=0`;
     async function load(){
       try{
@@ -122,8 +130,12 @@
         if(!ALL_DATA.length)throw new Error('Sin filas validas.');
         ALL_YEARS=[...new Set(ALL_DATA.map(r=>r['AÑO']).filter(Boolean))].sort();
         const sf=localStorage.getItem('convenios-filter')||'Todos';
+        const scf=localStorage.getItem('convenios-filter-cp')||'Todas';
+        ACTIVE_YEAR=sf; ACTIVE_CP=scf;
+        const ALL_CPS=[...new Set(ALL_DATA.map(r=>(r['Contraparte']||'').trim()).filter(Boolean))].sort();
         document.getElementById('app').innerHTML=`
           <div class="filter-bar"><span class="filter-label">Año</span>${['Todos',...ALL_YEARS].map(y=>`<button class="filter-btn${y===sf?' active':''}" data-year="${y}" onclick="setFilter('${y}')">${y}</button>`).join('')}</div>
+          <div class="filter-bar" style="max-height:80px;overflow-y:auto;"><span class="filter-label">Contraparte</span>${['Todas',...ALL_CPS].map(cp=>`<button class="filter-btn${cp===scf?' active':''}" data-cp="${cp.replace(/"/g,'&quot;')}" onclick="setFilterCP('${cp.replace(/'/g,"\\'")}')">${cp}</button>`).join('')}</div>
           <div class="kpis">
             <div class="kpi"><div class="kpi-value" id="kpi-total">—</div><div class="kpi-label">Total Convenios</div></div>
             <div class="kpi"><div class="kpi-value" id="kpi-contra">—</div><div class="kpi-label">Contrapartes</div></div>
@@ -152,7 +164,7 @@
               <tbody id="tabla-body"></tbody>
             </table>
           </div>`;
-        renderEvolucion();renderAll(sf==='Todos'?ALL_DATA:ALL_DATA.filter(r=>r['AÑO']===sf));
+        renderEvolucion();applyFilters();
       }catch(e){document.getElementById('app').innerHTML=`<div class="error">❌ ${e.message}</div>`;}
     }
     function waitForCowork(cb,tries=0){if(window.cowork&&typeof window.cowork.callMcpTool==='function')cb();else if(tries<50)setTimeout(()=>waitForCowork(cb,tries+1),100);else load();}
