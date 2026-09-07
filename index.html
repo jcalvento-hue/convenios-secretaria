@@ -29,6 +29,18 @@
     .loading-spinner { display: inline-block; width: 28px; height: 28px; border: 3px solid #e2e8f0; border-top-color: #2563eb; border-radius: 50%; animation: spin 0.8s linear infinite; margin-bottom: 12px; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .error { padding: 20px; color: #e53e3e; font-size: 0.85rem; background: white; border-radius: 10px; white-space: pre-wrap; word-break: break-all; }
+    .table-card { background: white; border-radius: 10px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.07); margin-bottom: 12px; }
+    .table-search { width: 100%; padding: 6px 10px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.8rem; margin-bottom: 10px; outline: none; }
+    .table-search:focus { border-color: #2563eb; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    thead th { text-align: left; font-size: 0.68rem; font-weight: 700; color: #a0aec0; text-transform: uppercase; letter-spacing: 0.6px; padding: 6px 8px; border-bottom: 2px solid #e2e8f0; }
+    thead th.num { text-align: right; }
+    tbody tr:hover { background: #f7fafc; }
+    tbody td { padding: 6px 8px; border-bottom: 1px solid #f0f4f8; color: #2d3748; }
+    tbody td.num { text-align: right; font-weight: 600; }
+    td.marco { color: #2563eb; }
+    td.espec { color: #16a34a; }
+    td.total-col { color: #1a202c; font-weight: 700; }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
 </head>
@@ -53,6 +65,24 @@
     function makeBar(id,labels,data,h){destroyChart(id);CHARTS[id]=new Chart(document.getElementById(id),{type:'bar',data:{labels,datasets:[{data,backgroundColor:PAL.slice(0,labels.length),borderWidth:0}]},options:{indexAxis:h?'y':'x',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:!h},ticks:{font:{size:10}}},y:{grid:{display:!!h},ticks:{font:{size:10}},beginAtZero:true}}}});}
     function makeDoughnut(id,labels,data){destroyChart(id);CHARTS[id]=new Chart(document.getElementById(id),{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:PAL.slice(0,labels.length),borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:10},boxWidth:11,padding:8}}}}});}
     function makeLine(id,years,datasets){destroyChart(id);CHARTS[id]=new Chart(document.getElementById(id),{type:'line',data:{labels:years,datasets:datasets.map((d,i)=>({label:d.label,data:d.data,borderColor:PAL[i],backgroundColor:PAL[i]+'22',tension:0.3,pointRadius:4,fill:true,borderWidth:2}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{font:{size:10},boxWidth:12}}},scales:{x:{grid:{display:false},ticks:{font:{size:10}}},y:{ticks:{font:{size:10},stepSize:1},beginAtZero:true}}}});}
+    let TABLA_DATA = [];
+    function renderTabla(data){
+      const map={};
+      data.forEach(r=>{
+        const cp=(r['Contraparte']||'').trim();if(!cp)return;
+        if(!map[cp])map[cp]={marco:0,espec:0};
+        const t=(r['Tipo de Convenio']||'').trim();
+        if(t==='Marco')map[cp].marco++;
+        else if(t==='Especifico'||t==='Específico')map[cp].espec++;
+      });
+      TABLA_DATA=Object.entries(map).map(([cp,v])=>({cp,marco:v.marco,espec:v.espec,total:v.marco+v.espec})).sort((a,b)=>b.total-a.total);
+      filterTabla();
+    }
+    function filterTabla(){
+      const q=(document.getElementById('tabla-search')||{value:''}).value.toLowerCase();
+      const rows=TABLA_DATA.filter(r=>r.cp.toLowerCase().includes(q));
+      document.getElementById('tabla-body').innerHTML=rows.map(r=>`<tr><td>${r.cp}</td><td class="num marco">${r.marco||''}</td><td class="num espec">${r.espec||''}</td><td class="num total-col">${r.total}</td></tr>`).join('');
+    }
     function renderAll(data){
       const nk=Object.keys(data[0]||{}).find(k=>k.toLowerCase().includes('nacional'))||'';
       document.getElementById('kpi-total').textContent=data.length;
@@ -67,6 +97,7 @@
       const objE=topEntries(count(data,'Objeto'));makeBar('c-objeto',objE.map(e=>e[0]),objE.map(e=>e[1]),false);
       const an={};Object.entries(count(data,'Área Involucrada')).forEach(([k,v])=>{const n=normalizeArea(k);an[n]=(an[n]||0)+v;});
       const aE=topEntries(an);makeBar('c-area',aE.map(e=>e[0]),aE.map(e=>e[1]),true);
+      renderTabla(data);
     }
     function renderEvolucion(){
       const m=ALL_YEARS.map(y=>ALL_DATA.filter(r=>r['AÑO']===y&&(r['Tipo de Convenio']||'').trim()==='Marco').length);
@@ -112,9 +143,17 @@
             <div class="chart-card wide"><div class="chart-title">Por Tipo de Entidad Contraparte</div><div class="chart-container tall"><canvas id="c-entidad"></canvas></div></div>
             <div class="chart-card wide"><div class="chart-title">Por Objeto</div><div class="chart-container"><canvas id="c-objeto"></canvas></div></div>
             <div class="chart-card wide"><div class="chart-title">Por Área Involucrada</div><div class="chart-container tall"><canvas id="c-area"></canvas></div></div>
+          </div>
+          <div class="section-title">Contrapartes (según filtro de año)</div>
+          <div class="table-card">
+            <input class="table-search" id="tabla-search" type="text" placeholder="Buscar contraparte..." oninput="filterTabla()">
+            <table id="tabla-contrapartes">
+              <thead><tr><th>Contraparte</th><th class="num">Marco</th><th class="num">Específico</th><th class="num">Total</th></tr></thead>
+              <tbody id="tabla-body"></tbody>
+            </table>
           </div>`;
         renderEvolucion();renderAll(sf==='Todos'?ALL_DATA:ALL_DATA.filter(r=>r['AÑO']===sf));
-      }catch(e){document.getElementById('app').innerHTML<`<div class="error">❌ ${e.message}</div>`;}
+      }catch(e){document.getElementById('app').innerHTML=`<div class="error">❌ ${e.message}</div>`;}
     }
     function waitForCowork(cb,tries=0){if(window.cowork&&typeof window.cowork.callMcpTool==='function')cb();else if(tries<50)setTimeout(()=>waitForCowork(cb,tries+1),100);else load();}
     waitForCowork(load);
